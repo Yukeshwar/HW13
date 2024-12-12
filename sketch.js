@@ -1,85 +1,133 @@
-// serial variables
 let mSerial;
-
 let connectButton;
+let readyToReceive = false;
 
-let readyToReceive;
+// Variables for controlling the pyramid
+let potValue = 512; 
+let buttonCount = 0;
+let baseSize = 100; 
+let colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff'];
+let currentColors = [...colors]; 
 
-// project variables
-let mElls = [];
+function setup() {
+  createCanvas(windowWidth, windowHeight);
 
-function receiveSerial() {
-  let line = mSerial.readUntil("\n");
-  trim(line);
-  if (!line) return;
+  // Setup serial communication
+  mSerial = createSerial();
+  connectButton = createButton("Connect to Serial");
+  connectButton.position(width / 2 - 50, height / 2);
+  connectButton.mousePressed(connectToSerial);
 
-  if (line.charAt(0) != "{") {
-    print("error: ", line);
-    readyToReceive = true;
-    return;
+  readyToReceive = false;
+}
+
+function draw() {
+  background(200);
+
+  // Adjust base size dynamically based on potentiometer
+  let dynamicSize = map(potValue, 0, 1023, 50, 300);
+
+  // Draw the pyramid
+  drawPyramid(width / 2, height / 2, dynamicSize);
+
+  
+  if (mSerial.opened() && readyToReceive) {
+    mSerial.write(0xAB); // Request data
+    readyToReceive = false;
   }
 
-  // get data from Serial string
-  let data = JSON.parse(line).data;
-  let a0 = data.A0;
-  let d2 = data.D2;
-
-  // use data to update project variables
-  if (d2.isPressed) {
-    mElls.push({
-      x: random(width),
-      y: random(height),
-      c: map(d2.count % 20, 0, 20, 155, 255),
-      d: map(a0.value, 0, 4095, 20, 200),
-    });
+  // Read incoming serial data
+  if (mSerial.availableBytes() > 0) {
+    receiveSerial();
   }
+}
 
-  // serial update
-  readyToReceive = true;
+function drawPyramid(centerX, centerY, size) {
+  noStroke();
+
+  // Base triangle
+  fill(currentColors[0]);
+  triangle(centerX - size, centerY + size, centerX, centerY - size, centerX + size, centerY + size);
+
+  // Left trapezoid
+  fill(currentColors[1]);
+  beginShape();
+  vertex(centerX - size, centerY + size);
+  vertex(centerX - size / 2, centerY + size / 2);
+  vertex(centerX, centerY + size);
+  vertex(centerX - size / 2, centerY + size + size / 2);
+  endShape(CLOSE);
+
+  // Right trapezoid
+  fill(currentColors[2]);
+  beginShape();
+  vertex(centerX + size, centerY + size);
+  vertex(centerX + size / 2, centerY + size / 2);
+  vertex(centerX, centerY + size);
+  vertex(centerX + size / 2, centerY + size + size / 2);
+  endShape(CLOSE);
+
+  // Top trapezoid
+  fill(currentColors[3]);
+  beginShape();
+  vertex(centerX, centerY - size);
+  vertex(centerX - size / 2, centerY - size / 2);
+  vertex(centerX + size / 2, centerY - size / 2);
+  vertex(centerX, centerY);
+  endShape(CLOSE);
+
+  // Bottom trapezoid
+  fill(currentColors[4]);
+  beginShape();
+  vertex(centerX - size / 2, centerY + size / 2);
+  vertex(centerX + size / 2, centerY + size / 2);
+  vertex(centerX + size, centerY + size + size / 2);
+  vertex(centerX - size, centerY + size + size / 2);
+  endShape(CLOSE);
 }
 
 function connectToSerial() {
   if (!mSerial.opened()) {
     mSerial.open(9600);
-
-    readyToReceive = true;
     connectButton.hide();
+    readyToReceive = true;
   }
 }
 
-function setup() {
-  // setup project
-  createCanvas(windowWidth, windowHeight);
+function receiveSerial() {
+  let line = mSerial.readUntil("\n").trim(); 
+  if (!line) return;
 
-  // setup serial
-  readyToReceive = false;
+  try {
+    if (!line.startsWith("{")) {
+      console.error("Invalid JSON format:", line);
+      readyToReceive = true;
+      return;
+    }
 
-  mSerial = createSerial();
+    
+    let data = JSON.parse(line).data;
 
-  connectButton = createButton("Connect To Serial");
-  connectButton.position(width / 2, height / 2);
-  connectButton.mousePressed(connectToSerial);
+    potValue = data?.A0?.value ?? 512; 
+    buttonCount = data?.D2?.count ?? 0;
+
+    // Log the values for debugging
+    console.log(`Potentiometer: ${potValue}, Button Count: ${buttonCount}`);
+
+    // Update colors
+    updateColors();
+  } catch (error) {
+    console.error("JSON Parsing Error:", error);
+    console.error("Raw Data:", line);
+  }
+
+  readyToReceive = true;
 }
 
-function draw() {
-  // project logic
-  background(0);
-
-  for (let i = 0; i < mElls.length; i++) {
-    let me = mElls[i];
-    fill(me.c, 0, 0);
-    ellipse(me.x, me.y, me.d, me.d);
-  }
-
-  // update serial: request new data
-  if (mSerial.opened() && readyToReceive) {
-    readyToReceive = false;
-    mSerial.clear();
-    mSerial.write(0xab);
-  }
-
-  // update serial: read new data
-  if (mSerial.availableBytes() > 8) {
-    receiveSerial();
+function updateColors() {
+  // Cycle colors based on buttonCount
+  if (buttonCount > 0) {
+    let shiftAmount = buttonCount % colors.length;
+    currentColors = colors.slice(shiftAmount).concat(colors.slice(0, shiftAmount));
   }
 }
